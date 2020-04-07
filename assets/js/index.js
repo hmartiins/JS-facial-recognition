@@ -17,9 +17,28 @@ const startVideo = () => {
                         )
                     }
                 }
-            })
+            });
         }
-    })
+    });
+}
+
+const loadLabels = () =>{
+    const labels = ['Henrique Martins'];
+    return Promise.all(labels.map(async label => {
+        const descriptions = [];
+
+        for(let x = 1; x < 6; x++){
+            const img = await faceapi.fetchImage(`/assets/lib/face-api/labels/${label}/${x}.jpg`);
+            
+            const detections = await faceapi
+                .detectSingleFace(img)
+                .withFaceLandmarks()
+                .withFaceDescriptor()
+
+            descriptions.push(detections.descriptor);
+        }
+        return new faceapi.LabeledFaceDescriptors(label, descriptions);
+    }));
 }
 
 Promise.all([    
@@ -29,36 +48,59 @@ Promise.all([
     faceapi.nets.faceExpressionNet.loadFromUri('/assets/lib/face-api/models'),
     faceapi.nets.ageGenderNet.loadFromUri('/assets/lib/face-api/models'),
     faceapi.nets.ssdMobilenetv1.loadFromUri('/assets/lib/face-api/models'),
-]).then(startVideo)
+]).then(startVideo);
 
 cam.addEventListener('play', async () => {
-    const canvas = faceapi.createCanvasFromMedia(cam)
+    const canvas = faceapi.createCanvasFromMedia(cam);
+    
     const canvasSize = {
         width: cam.width,
         height: cam.height
     }
-    faceapi.matchDimensions(canvas, canvasSize)
-    document.body.appendChild(canvas)
+    const labels = await loadLabels();
+
+    faceapi.matchDimensions(canvas, canvasSize);
+    document.body.appendChild(canvas);
+
     setInterval(async () => {
         const detections = await faceapi
+        
         .detectAllFaces(
             cam, 
             new faceapi.TinyFaceDetectorOptions()
-            )
+        )
             .withFaceLandmarks()
             .withFaceExpressions()
             .withAgeAndGender()
-            const resizedDetections = faceapi.resizeResults(detections, canvasSize)
-            canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
-            faceapi.draw.drawDetections(canvas, resizedDetections)
-            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections)
-            faceapi.draw.drawFaceExpressions(canvas, resizedDetections)
+            .withFaceDescriptors()
+
+            const resizedDetections = faceapi.resizeResults(detections, canvasSize);
+
+            const faceMatcher = new faceapi.FaceMatcher(labels, 0.6);
+
+            const results = resizedDetections.map(d =>
+                faceMatcher.findBestMatch(d.descriptor)
+            );
+
+            canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+            faceapi.draw.drawDetections(canvas, resizedDetections);
+            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+            faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+
             resizedDetections.forEach(detection =>{
-                const { age, gender, genderProbability } = detection
+                const { age, gender, genderProbability } = detection;
                 new faceapi.draw.DrawTextField([
-                    `${age} years`,
-                    `${gender} (${genderProbability})`
-                ], detection.detection.box.topRight).draw(canvas)
-            })
-    }, 100)
-})
+                    `${parseInt(age, 10)} anos`,
+                    `${gender} ${parseInt(genderProbability * 100, 10)}%`
+                ], detection.detection.box.topRight).draw(canvas);
+            });
+
+            results.forEach((result, index) => {
+                const box = resizedDetections[index].detection.box;
+                const { label, distance } = result;
+                new faceapi.draw.DrawTextField([
+                    `${label} (${parseInt(distance * 100, 10)})`
+                ], box.bottomRight).draw(canvas);
+            });
+    }, 100);
+});
